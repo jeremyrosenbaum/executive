@@ -1,3 +1,5 @@
+#!/usr/bin/env python
+
 import argparse
 import logging
 import os
@@ -10,7 +12,7 @@ from pprint import pformat
 logging.basicConfig(level=logging.DEBUG)
 main_logger = logging.getLogger(__name__)
 
-VALID_ORDERS = ['ping', 'show_results']
+VALID_ORDERS = ['ping', 'reverse', 'show_results']
 
 class Executive(object):
     def __init__(self, queue=None):
@@ -18,14 +20,10 @@ class Executive(object):
         self.log = logging.getLogger(self.__class__.__name__)
         self.log.info("Set up Executive instance with pid %s" % os.getpid())
 
-    def send_order(self, order=None):
-        if order:
-            self.queue.put(order)
-            self.log.info("Sent order: %s" % order)
-            return True
-        else:
-            self.log.warning("No order to send!")
-            return False
+    def send_order(self, order, params=None):
+        msg = {'order': order, 'params': params}
+        self.queue.put(msg)
+        self.log.info("Sent order {0} with params {1}".format(order, params))
 
 class Grunt(multiprocessing.Process):
     def __init__(self, queue=None, opts={}):
@@ -56,30 +54,29 @@ class Grunt(multiprocessing.Process):
     def recv_order(self):
         try:
             order = self.queue.get(True, self.timeout)
-            self.log.debug("Got order: %s" % order)
+            self.log.debug("Got order: {0}".format(order))
             return order
         except Queue.Empty:
             self.log.warning("No task received after %i seconds" % self.timeout)
             return None
 
-    def carry_out(self, order=None):
+    def carry_out(self, msg):
         result = None
-        if order:
-            if order in self.orders:
-                self.log.debug("Found valid order: %s" % order)
-                result = self.orders[order]()
+        order = msg['order']
+        params = msg['params']
+        if params and len(params) == 1:
+            params = params[0]
+
+        if order in self.orders:
+            self.log.debug("Found valid order: %s" % order)
+            if params:
+                result = self.orders[order](params)
             else:
-                self.log.error("Invalid order received: %s" % order)
-                result = 'invalid_order'
+                result = self.orders[order]()
         else:
-            self.log.warning("No order received!")
+            self.log.error("Invalid order received: %s" % order)
+            result = 'invalid_order'
         return {'order': order, 'time_done': time.time(), 'result': result}
-
-    def ping(self):
-        return True
-
-    def show_results(self):
-        self.log.info("Results:\n{0}".format(pformat(self.results)))
 
     def run(self):
         self.log.info("Starting with pid %s" % self.pid)
@@ -95,10 +92,22 @@ class Grunt(multiprocessing.Process):
                 self.log.info("Waiting %i seconds for more orders" % self.wait_intv)
                 time.sleep(self.wait_intv)
 
+    # Orders
+    def ping(self):
+        return True
+
+    def reverse(self, msg):
+        return msg[::-1]
+
+    def show_results(self):
+        self.log.info("Results:\n{0}".format(pformat(self.results)))
+
+
 def handle_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('-o', '--orders', nargs='+', required=True,
-                        help='orders to send the grunt')
+                        help='Valid orders are: {0}'.format(VALID_ORDERS) +
+                        '\nAdd parameters like: order:param1,param2,...')
     return parser.parse_args()
 
 if __name__ == '__main__':
@@ -111,7 +120,11 @@ if __name__ == '__main__':
     grunt_worker.daemon = True
     grunt_worker.start()
     for order in args.orders:
-        executive.send_order(order)
+        params = order.split(':')
+        if params and len(params) > 1:
+            executive.send_order(params[0], params[1:])
+        else: 
+            executive.send_order(order)
     main_logger.info("Sent %i orders!" % len(args.orders))
 
     q.join()
