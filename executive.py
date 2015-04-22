@@ -9,8 +9,6 @@ import time
 from pprint import pformat
 
 
-logging.basicConfig(level=logging.DEBUG)
-main_logger = logging.getLogger(__name__)
 
 VALID_ORDERS = ['ping', 'reverse', 'show_results']
 
@@ -108,10 +106,14 @@ def handle_args():
     parser.add_argument('-o', '--orders', nargs='+', required=True,
                         help='Valid orders are: {0}'.format(VALID_ORDERS) +
                         '\nAdd parameters like: order:param1,param2,...')
+    parser.add_argument('-l', '--loglevel', default='INFO', help="Log detail level")
     return parser.parse_args()
 
 if __name__ == '__main__':
     args = handle_args()
+
+    logging.basicConfig(level=getattr(logging, args.loglevel.upper()))
+    main_logger = logging.getLogger('main')
 
     q = multiprocessing.JoinableQueue()
     grunt_worker = Grunt(queue=q)
